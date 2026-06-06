@@ -1,5 +1,3 @@
-// TSC2007 over BSC1 — local xfer so a missing chip does not panic libpi i2c
-// command layout matches Adafruit_TSC2007 (func<<4 | pwr<<2 | adc<<1)
 #include "tsc2007.h"
 
 #include "libc/bit-support.h"
