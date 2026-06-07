@@ -12,7 +12,8 @@ make
 ```
 
 ## Build and run on powerup (flash to SD card)
-```
+```bash
+cd labs/final-project/oled-neopixel-sanity
 make install-sd SD=/Volumes/DISK_IMG
 diskutil eject /Volumes/DISK_IMG
 ```
