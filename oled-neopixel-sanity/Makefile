@@ -2,11 +2,12 @@ PROGS = main.c
 
 WS2812_DIR = ../../11-ws2812b/1-code
 
-COMMON_SRC = ssd1306-display-driver.c
-COMMON_SRC += standard-ascii-font.c
-COMMON_SRC += i2c.c
+COMMON_SRC = libs/display/ssd1306-display-driver.c
+COMMON_SRC += libs/display/standard-ascii-font.c
+COMMON_SRC += libs/i2c/i2c.c
 
-INC += -I$(WS2812_DIR) -I.
+LIB_INC = -Ilibs/i2c -Ilibs/display -Ilibs/sd -Ilibs/fat32
+INC += -I$(WS2812_DIR) $(LIB_INC)
 OPT_LEVEL = -O2
 RUN = 1
 
