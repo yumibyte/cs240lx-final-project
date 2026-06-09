@@ -87,6 +87,15 @@ void ssd1306_display_show(void) {
   i2c_write(SSD1306_DISPLAY_ADDRESS, i2c_buffer, sizeof(i2c_buffer));
 }
 
+void ssd1306_display_snapshot_save(uint8_t buf[SSD1306_DISPLAY_BUFFER_SIZE]) {
+  memcpy(buf, display_buffer, SSD1306_DISPLAY_BUFFER_SIZE);
+}
+
+void ssd1306_display_snapshot_restore(
+    const uint8_t buf[SSD1306_DISPLAY_BUFFER_SIZE]) {
+  memcpy(display_buffer, buf, SSD1306_DISPLAY_BUFFER_SIZE);
+}
+
 // Clears the screen to black; no change until display_show() is called
 void ssd1306_display_clear(void) {
   i2c_buffer[0] = 0x40; // control byte to indicate data
@@ -194,4 +203,46 @@ void ssd1306_display_draw_character_size(uint16_t x, uint16_t y,
     //     ssd1306_display_draw_fill_rect(x + 5 * size_x, y, size_x, 8 * size_y, bg);
     // }
 
+}
+
+static unsigned display_string_len(const char *msg) {
+  unsigned len = 0;
+  while(msg[len])
+    len++;
+  return len;
+}
+
+void ssd1306_display_draw_string(uint16_t x, uint16_t y, const char *msg,
+                                 color_t color) {
+  for(unsigned c = 0; msg[c]; c++, x += 6) {
+    for(int8_t col = 0; col < 5; col++) {
+      uint8_t line = standard_ascii_font[(unsigned char)msg[c] * 5 + col];
+      for(int8_t row = 0; row < 7; row++, line >>= 1) {
+        if(line & 1) {
+          uint16_t rx = (SSD1306_DISPLAY_WIDTH - 1) - (x + col);
+          uint16_t ry = (SSD1306_DISPLAY_HEIGHT - 1) - (y + row);
+          ssd1306_display_draw_pixel(rx, ry, color);
+        }
+      }
+    }
+  }
+}
+
+void ssd1306_display_draw_string_centered(uint16_t y, const char *msg,
+                                          color_t color) {
+  unsigned len = display_string_len(msg);
+  uint16_t x = 0;
+  if(len * 6 < SSD1306_DISPLAY_WIDTH)
+    x = (uint16_t)((SSD1306_DISPLAY_WIDTH - len * 6) / 2);
+  ssd1306_display_draw_string(x, y, msg, color);
+}
+
+void ssd1306_display_show_message_lines(const char *line1, const char *line2,
+                                        color_t color) {
+  ssd1306_display_clear();
+  if(line1)
+    ssd1306_display_draw_string_centered(20, line1, color);
+  if(line2)
+    ssd1306_display_draw_string_centered(36, line2, color);
+  ssd1306_display_show();
 }

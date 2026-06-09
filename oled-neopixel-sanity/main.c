@@ -2,6 +2,7 @@
 #include "i2c.h"
 #include "ssd1306-display-driver.h"
 #include "led-graphics.h"
+#include "sig-save.h"
 
 #define TSC2007_ADDR 0x48
 #define CMD_Z1 0xE4
@@ -18,6 +19,9 @@ enum {
   scroll_step_ms = 75,
   go_trees_split = 3,
   go_trees_blink_char = 8,
+  sig_grace_ms = 5000,
+  sig_countdown_secs = 5,
+  sig_sent_show_ms = 2000,
 };
 
 static const led_rgb_t go_red = {
@@ -128,13 +132,59 @@ static void oled_draw_touch_point(uint32_t x, uint32_t y) {
   }
 }
 
+static void oled_show_waiting(void) {
+  ssd1306_display_show_message_lines("waiting for your", "signature...",
+                                     COLOR_WHITE);
+}
+
+static void oled_show_countdown(unsigned sec_left) {
+  ssd1306_display_clear();
+  if(sec_left >= 5)
+    ssd1306_display_draw_string_centered(28, "Sending in 5", COLOR_WHITE);
+  else if(sec_left == 4)
+    ssd1306_display_draw_string_centered(28, "4...", COLOR_WHITE);
+  else if(sec_left == 3)
+    ssd1306_display_draw_string_centered(28, "3...", COLOR_WHITE);
+  else if(sec_left == 2)
+    ssd1306_display_draw_string_centered(28, "2...", COLOR_WHITE);
+  else
+    ssd1306_display_draw_string_centered(28, "1...", COLOR_WHITE);
+  ssd1306_display_show();
+}
+
+static void oled_show_sent(void) {
+  ssd1306_display_clear();
+  ssd1306_display_draw_string_centered(28, "Sent!", COLOR_WHITE);
+  ssd1306_display_show();
+}
+
+static uint8_t oled_drawing_snapshot[SSD1306_DISPLAY_BUFFER_SIZE];
+static int oled_drawing_saved = 0;
+
+static void oled_drawing_snapshot_save(void) {
+  ssd1306_display_snapshot_save(oled_drawing_snapshot);
+  oled_drawing_saved = 1;
+}
+
+static void oled_drawing_snapshot_restore(void) {
+  if(!oled_drawing_saved)
+    return;
+  ssd1306_display_snapshot_restore(oled_drawing_snapshot);
+  ssd1306_display_show();
+}
+
+static void oled_drawing_snapshot_clear(void) {
+  oled_drawing_saved = 0;
+}
+
 void notmain(void) {
   output("cap board boot\n");
 
+  sig_init();
+
   i2c_init();
   ssd1306_display_init();
-  ssd1306_display_clear();
-  ssd1306_display_show();
+  oled_show_waiting();
 
   caches_enable();
   gpio_set_output(pix_pin);
@@ -149,8 +199,20 @@ void notmain(void) {
   int pending_phase = phase_tree;
   uint32_t phase_start_usec = timer_get_usec();
 
+  int has_strokes = 0;
+  int countdown_sec = -1;
+  int showing_sent = 0;
+  uint32_t last_touch_usec = 0;
+  uint32_t sent_until_usec = 0;
   unsigned point_count = 0;
   while (1) {
+    if(showing_sent && timer_get_usec() >= sent_until_usec) {
+      showing_sent = 0;
+      oled_drawing_snapshot_clear();
+      oled_show_waiting();
+      countdown_sec = -1;
+    }
+
     if(cycle_phase == phase_transition) {
       if(led_gfx_tick_transition(&gfx)) {
         cycle_phase = pending_phase;
@@ -183,18 +245,66 @@ void notmain(void) {
 
     uint16_t touch_x = 0;
     uint16_t touch_y = 0;
-    if (tsc2007_read_touch(&touch_x, &touch_y)) {
+    if(!showing_sent && tsc2007_read_touch(&touch_x, &touch_y)) {
+      int was_countdown = countdown_sec >= 0;
+      countdown_sec = -1;
+
+      if(was_countdown) {
+        oled_drawing_snapshot_restore();
+      } else if(!has_strokes) {
+        oled_drawing_snapshot_clear();
+        ssd1306_display_clear();
+        ssd1306_display_show();
+      }
+
       uint32_t pixel_x = 0;
       uint32_t pixel_y = 0;
       map_touch_to_pixel(touch_x, touch_y, SSD1306_DISPLAY_WIDTH,
                          SSD1306_DISPLAY_HEIGHT, &pixel_x, &pixel_y);
       oled_draw_touch_point(pixel_x, pixel_y);
+      sig_draw_point(touch_x, touch_y);
+      last_touch_usec = timer_get_usec();
+      has_strokes = 1;
       point_count++;
       if (point_count % 5 == 0) {
         ssd1306_display_show();
       }
       output("touch x=%u y=%u -> oled %u,%u\n", touch_x, touch_y, pixel_x,
              pixel_y);
+    } else if(has_strokes && !showing_sent) {
+      uint32_t idle_usec = timer_get_usec() - last_touch_usec;
+      uint32_t grace_usec = (uint32_t)sig_grace_ms * 1000;
+      uint32_t countdown_usec = (uint32_t)sig_countdown_secs * 1000000;
+      uint32_t save_after_usec = grace_usec + countdown_usec;
+
+      if(idle_usec >= save_after_usec) {
+        output("sig: saving...\n");
+        sig_save();
+        sig_clear();
+        oled_show_sent();
+        showing_sent = 1;
+        sent_until_usec = timer_get_usec()
+                          + (uint32_t)sig_sent_show_ms * 1000;
+        has_strokes = 0;
+        countdown_sec = -1;
+        point_count = 0;
+        oled_drawing_snapshot_clear();
+        output("sig: saved, ready for next\n");
+      } else if(idle_usec >= grace_usec) {
+        uint32_t countdown_elapsed = idle_usec - grace_usec;
+        unsigned sec_left = sig_countdown_secs
+                            - countdown_elapsed / 1000000;
+        if(sec_left < 1)
+          sec_left = 1;
+        if((int)sec_left != countdown_sec) {
+          if(countdown_sec < 0)
+            oled_drawing_snapshot_save();
+          countdown_sec = (int)sec_left;
+          oled_show_countdown(sec_left);
+        }
+      } else if(countdown_sec >= 0) {
+        countdown_sec = -1;
+      }
     }
     delay_ms(poll_ms);
   }

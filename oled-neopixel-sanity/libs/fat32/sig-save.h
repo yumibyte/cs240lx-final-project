@@ -3,6 +3,7 @@
 #include "fat32.h"
 #include "mbr.h"
 #include "pi-sd.h"
+#include "sig-zip.h"
 
 // OLED:    128 x 64 pixels
 // TSC2007: outputs 0-4095 for both X and Y
@@ -43,16 +44,19 @@ void sig_init(void) {
     int max = -1;
     for (int i = 0; i < dir.ndirents; i++) {
         char *n = dir.dirents[i].name;
-        if (n[0]=='S' && n[1]=='I' && n[2]=='G'
-         && n[3]>='0' && n[3]<='9'
-         && n[4]>='0' && n[4]<='9'
-         && n[5]>='0' && n[5]<='9') {
+        int is_sig = n[0]=='S' && n[1]=='I' && n[2]=='G'
+                  && n[3]>='0' && n[3]<='9'
+                  && n[4]>='0' && n[4]<='9'
+                  && n[5]>='0' && n[5]<='9';
+        int is_zip = n[6]=='.' && n[7]=='Z' && n[8]=='I' && n[9]=='P';
+        int is_bmp = n[6]=='.' && n[7]=='B' && n[8]=='M' && n[9]=='P';
+        if (is_sig && (is_zip || is_bmp)) {
             int num = (n[3]-'0')*100 + (n[4]-'0')*10 + (n[5]-'0');
             if (num > max) max = num;
         }
     }
     sig_counter = (max >= 0) ? max + 1 : 0;
-    printk("sig_init: SD ready, starting from SIG%d%d%d.BMP\n",
+    printk("sig_init: SD ready, starting from SIG%d%d%d.ZIP\n",
         sig_counter/100, (sig_counter/10)%10, sig_counter%10);
 
     // clear pixel buffer to white for first signature
@@ -75,25 +79,26 @@ void sig_draw_point(uint16_t tx, uint16_t ty) {
     }
 }
 
-// Render sig_pixels as a 24-bit BMP and write it to the SD card.
-// Filename cycles: SIG000.BMP, SIG001.BMP, ...
+// Render sig_pixels as a 24-bit BMP, zip it, and write SIG###.ZIP to the SD card.
+// The archive contains SIG###.BMP (deflate-compressed).
 // Call when button is pressed or timeout fires, then call sig_clear().
 void sig_save(void) {
-    char filename[12] = "SIG000.BMP";
-    filename[3] = '0' + (sig_counter / 100) % 10;
-    filename[4] = '0' + (sig_counter / 10)  % 10;
-    filename[5] = '0' +  sig_counter        % 10;
+    char zip_name[12] = "SIG000.ZIP";
+    char bmp_name[12] = "SIG000.BMP";
+    zip_name[3] = bmp_name[3] = '0' + (sig_counter / 100) % 10;
+    zip_name[4] = bmp_name[4] = '0' + (sig_counter / 10)  % 10;
+    zip_name[5] = bmp_name[5] = '0' +  sig_counter        % 10;
 
     uint32_t row_bytes  = SIG_W * 3;
     uint32_t pixel_size = row_bytes * SIG_H;
-    uint32_t file_size  = 54 + pixel_size;
+    uint32_t bmp_size   = 54 + pixel_size;
 
-    uint8_t *bmp = kmalloc(file_size);
+    uint8_t *bmp = kmalloc(bmp_size);
     memset(bmp, 0, 54);
 
     // BMP file header (14 bytes) — Microsoft BMP standard
     bmp[0] = 'B'; bmp[1] = 'M';
-    *(uint32_t *)(bmp +  2) = file_size;
+    *(uint32_t *)(bmp +  2) = bmp_size;
     *(uint32_t *)(bmp + 10) = 54;           // pixel data offset
 
     // DIB / BITMAPINFOHEADER (40 bytes at offset 14)
@@ -109,15 +114,19 @@ void sig_save(void) {
 
     memcpy(bmp + 54, sig_pixels, pixel_size);
 
-    fat32_delete(&sig_fs, &sig_root, filename);
-    assert(fat32_create(&sig_fs, &sig_root, filename, 0));
+    uint8_t *zip = 0;
+    uint32_t zip_size = 0;
+    assert(sig_zip_pack(bmp_name, bmp, bmp_size, &zip, &zip_size) == 0);
+
+    fat32_delete(&sig_fs, &sig_root, zip_name);
+    assert(fat32_create(&sig_fs, &sig_root, zip_name, 0));
     pi_file_t f = {
-        .data    = (char *)bmp,
-        .n_data  = file_size,
-        .n_alloc = file_size,
+        .data    = (char *)zip,
+        .n_data  = zip_size,
+        .n_alloc = zip_size,
     };
-    assert(fat32_write(&sig_fs, &sig_root, filename, &f));
-    printk("sig_save: wrote %s (%d bytes)\n", filename, file_size);
+    assert(fat32_write(&sig_fs, &sig_root, zip_name, &f));
+    printk("sig_save: wrote %s (%d bytes, bmp %d)\n", zip_name, zip_size, bmp_size);
 
     sig_counter++;
 }
