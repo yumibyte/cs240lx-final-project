@@ -3,6 +3,8 @@
 #include "ssd1306-display-driver.h"
 #include "led-graphics.h"
 #include "sig-save.h"
+#include "ble.h"
+#include "ble_xfer.h"
 
 #define TSC2007_ADDR 0x48
 #define CMD_Z1 0xE4
@@ -22,7 +24,14 @@ enum {
   sig_grace_ms = 5000,
   sig_countdown_secs = 5,
   sig_sent_show_ms = 2000,
+  ble_blink_ms = 500,
+  ble_name_corner_w = 14,
+  ble_name_corner_h = 7,
 };
+
+static struct ble_conn g_ble_conn;
+static int ble_blink_on = 1;
+static uint32_t ble_blink_last_usec = 0;
 
 static const led_rgb_t go_red = {
     .r = LED_MAX_BRIGHT,
@@ -116,6 +125,43 @@ static int tsc2007_read_touch(uint16_t *touch_x, uint16_t *touch_y) {
   return (*touch_x != 4095) && (*touch_y != 4095);
 }
 
+static void oled_ble_clear_corner(void) {
+  for(unsigned row = 0; row < ble_name_corner_h; row++) {
+    for(unsigned col = 0; col < ble_name_corner_w; col++)
+      ssd1306_display_draw_pixel(col, row, COLOR_BLACK);
+  }
+}
+
+static void oled_ble_status_overlay(int show_disconnected) {
+  oled_ble_clear_corner();
+  if(show_disconnected && ble_blink_on)
+    ssd1306_display_draw_string(0, 0, "BT", COLOR_WHITE);
+}
+
+static void oled_flush(void) {
+  oled_ble_status_overlay(!g_ble_conn.connected);
+  ssd1306_display_show();
+}
+
+static void on_nus_write(u16 handle, const u8 *data, u16 len) {
+  if(handle != BLE_NUS_RX_HANDLE)
+    return;
+  ble_xfer_handle(&g_ble_conn, data, len);
+}
+
+static void ble_register_saved_zip(void) {
+  const uint8_t *zip = 0;
+  uint32_t zip_len = 0;
+  sig_last_saved_zip(&zip, &zip_len);
+  if(!zip || zip_len == 0)
+    return;
+  int image_id = ble_xfer_add_image(zip, zip_len);
+  if(image_id < 0)
+    output("ble: image store full, zip not queued\n");
+  else
+    output("ble: queued SIG zip id=%d (%d bytes)\n", image_id, zip_len);
+}
+
 static void oled_draw_touch_point(uint32_t x, uint32_t y) {
   ssd1306_display_draw_pixel(x, y, COLOR_WHITE);
   if (x > 0) {
@@ -133,8 +179,10 @@ static void oled_draw_touch_point(uint32_t x, uint32_t y) {
 }
 
 static void oled_show_waiting(void) {
-  ssd1306_display_show_message_lines("waiting for your", "signature...",
-                                     COLOR_WHITE);
+  ssd1306_display_clear();
+  ssd1306_display_draw_string_centered(20, "waiting for your", COLOR_WHITE);
+  ssd1306_display_draw_string_centered(36, "signature...", COLOR_WHITE);
+  oled_flush();
 }
 
 static void oled_show_countdown(unsigned sec_left) {
@@ -149,13 +197,13 @@ static void oled_show_countdown(unsigned sec_left) {
     ssd1306_display_draw_string_centered(28, "2...", COLOR_WHITE);
   else
     ssd1306_display_draw_string_centered(28, "1...", COLOR_WHITE);
-  ssd1306_display_show();
+  oled_flush();
 }
 
 static void oled_show_sent(void) {
   ssd1306_display_clear();
   ssd1306_display_draw_string_centered(28, "Sent!", COLOR_WHITE);
-  ssd1306_display_show();
+  oled_flush();
 }
 
 static uint8_t oled_drawing_snapshot[SSD1306_DISPLAY_BUFFER_SIZE];
@@ -170,7 +218,7 @@ static void oled_drawing_snapshot_restore(void) {
   if(!oled_drawing_saved)
     return;
   ssd1306_display_snapshot_restore(oled_drawing_snapshot);
-  ssd1306_display_show();
+  oled_flush();
 }
 
 static void oled_drawing_snapshot_clear(void) {
@@ -180,14 +228,26 @@ static void oled_drawing_snapshot_clear(void) {
 void notmain(void) {
   output("cap board boot\n");
 
+  caches_enable();
+
   sig_init();
 
   i2c_init();
   ssd1306_display_init();
   oled_show_waiting();
 
-  caches_enable();
   gpio_set_output(pix_pin);
+
+  output("ble: init...\n");
+  ble_init();
+  ble_xfer_init();
+  ble_set_write_callback(on_nus_write);
+  ble_start_nus_advertising("cs240lx-pi");
+  g_ble_conn.connected = false;
+  ble_blink_last_usec = timer_get_usec();
+  for(int i = 0; i < 32; i++)
+    ble_poll(&g_ble_conn);
+  output("ble: advertising as cs240lx-pi\n");
 
   led_gfx_t gfx = led_gfx_init(pix_pin, npixels);
 
@@ -205,7 +265,38 @@ void notmain(void) {
   uint32_t last_touch_usec = 0;
   uint32_t sent_until_usec = 0;
   unsigned point_count = 0;
+  int ble_was_connected = 0;
+  int ble_oled_dirty = 1;
   while (1) {
+    ble_poll(&g_ble_conn);
+    ble_xfer_poll(&g_ble_conn);
+
+    if(g_ble_conn.connected != ble_was_connected) {
+      ble_was_connected = g_ble_conn.connected;
+      ble_oled_dirty = 1;
+      if(!g_ble_conn.connected) {
+        ble_start_nus_advertising("cs240lx-pi");
+        output("ble: disconnected, advertising again\n");
+      } else {
+        output("ble: connected\n");
+      }
+    }
+
+    if(!g_ble_conn.connected) {
+      uint32_t now_usec = timer_get_usec();
+      if(now_usec - ble_blink_last_usec >= (uint32_t)ble_blink_ms * 1000) {
+        ble_blink_last_usec = now_usec;
+        ble_blink_on = !ble_blink_on;
+        ble_oled_dirty = 1;
+      }
+    }
+
+    if(ble_oled_dirty) {
+      oled_ble_status_overlay(!g_ble_conn.connected);
+      ssd1306_display_show();
+      ble_oled_dirty = 0;
+    }
+
     if(showing_sent && timer_get_usec() >= sent_until_usec) {
       showing_sent = 0;
       oled_drawing_snapshot_clear();
@@ -254,7 +345,7 @@ void notmain(void) {
       } else if(!has_strokes) {
         oled_drawing_snapshot_clear();
         ssd1306_display_clear();
-        ssd1306_display_show();
+        oled_flush();
       }
 
       uint32_t pixel_x = 0;
@@ -267,7 +358,7 @@ void notmain(void) {
       has_strokes = 1;
       point_count++;
       if (point_count % 5 == 0) {
-        ssd1306_display_show();
+        oled_flush();
       }
       output("touch x=%u y=%u -> oled %u,%u\n", touch_x, touch_y, pixel_x,
              pixel_y);
@@ -280,6 +371,7 @@ void notmain(void) {
       if(idle_usec >= save_after_usec) {
         output("sig: saving...\n");
         sig_save();
+        ble_register_saved_zip();
         sig_clear();
         oled_show_sent();
         showing_sent = 1;

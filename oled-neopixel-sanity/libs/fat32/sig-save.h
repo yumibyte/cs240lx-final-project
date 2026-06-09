@@ -18,6 +18,8 @@ static uint8_t     *sig_pixels = 0;   // heap-allocated in sig_init()
 static int         sig_counter = 0;
 static fat32_fs_t  sig_fs;
 static pi_dirent_t sig_root;
+static uint8_t    *sig_last_zip = 0;
+static uint32_t    sig_last_zip_size = 0;
 
 // Fill the pixel buffer white. Call after each save.
 void sig_clear(void) {
@@ -128,5 +130,15 @@ void sig_save(void) {
     assert(fat32_write(&sig_fs, &sig_root, zip_name, &f));
     printk("sig_save: wrote %s (%d bytes, bmp %d)\n", zip_name, zip_size, bmp_size);
 
+    sig_last_zip = zip;
+    sig_last_zip_size = zip_size;
     sig_counter++;
+}
+
+// last ZIP from sig_save(); valid until the next sig_save()
+void sig_last_saved_zip(const uint8_t **zip, uint32_t *zip_len) {
+    if(zip)
+        *zip = sig_last_zip;
+    if(zip_len)
+        *zip_len = sig_last_zip_size;
 }

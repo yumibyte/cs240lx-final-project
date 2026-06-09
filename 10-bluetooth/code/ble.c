@@ -255,6 +255,9 @@ static bool parse_le_connection_complete(struct hci_event_pkt *evt,
 
 // Interpret an HCI event during the data phase: disconnects + ACL credits.
 static void ble_handle_event(struct ble_conn *conn, struct hci_event_pkt *evt) {
+    if (parse_le_connection_complete(evt, conn))
+        return;
+
     switch (evt->event_code) {
     case EVENT_DISCONNECTION_COMPLETE:
         conn->connected = false;
@@ -762,12 +765,12 @@ static void ble_handle_acl(struct ble_conn *conn, struct hci_acl_data_pkt *acl) 
 }
 
 bool ble_poll(struct ble_conn *conn) {
-    struct hci_event_pkt *evt = bt_receive_event_async();
-    if (evt)
+    struct hci_event_pkt *evt;
+    while ((evt = bt_receive_event_async()) != NULL)
         ble_handle_event(conn, evt);
 
-    struct hci_acl_data_pkt *acl = bt_receive_acl_async();
-    if (acl)
+    struct hci_acl_data_pkt *acl;
+    while ((acl = bt_receive_acl_async()) != NULL)
         ble_handle_acl(conn, acl);
 
     return conn->connected;

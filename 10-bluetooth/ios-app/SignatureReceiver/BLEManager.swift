@@ -60,7 +60,8 @@ final class BLEManager: NSObject, ObservableObject {
         }
         status = .scanning
         statusText = "Scanning for \(deviceName)..."
-        central.scanForPeripherals(withServices: nil, options: nil)
+        let nus = CBUUID(string: CS24.serviceUUID)
+        central.scanForPeripherals(withServices: [nus], options: nil)
     }
 
     private func bluetoothStateMessage(_ state: CBManagerState) -> String {
@@ -216,13 +217,13 @@ extension BLEManager: CBCentralManagerDelegate {
                                     advertisementData: [String: Any],
                                     rssi RSSI: NSNumber) {
         let advName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        guard (advName == deviceName) || (peripheral.name == deviceName) else { return }
+        let piName = advName ?? peripheral.name ?? "cs240lx"
         Task { @MainActor in
             central.stopScan()
             self.peripheral = peripheral
             peripheral.delegate = self
             status = .connecting
-            statusText = "Connecting..."
+            statusText = "Connecting to \(piName)..."
             central.connect(peripheral, options: nil)
         }
     }

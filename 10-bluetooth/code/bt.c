@@ -31,7 +31,9 @@ void bt_init(void) {
 
     cq_init(&module.acl_rx_buffer, true);
     cq_init(&module.event_rx_buffer, true);
-    kmalloc_init();
+    // cap-board firmware calls sig_init() first; do not reset the heap here
+    if (kmalloc_heap_ptr() == kmalloc_heap_start())
+        kmalloc_init();
 
     // todo("Set the Bluetooth enable pin (BT_EN) to on and wait for 800ms. Remember to use gpio_hi.");
     gpio_hi_set_output(BT_EN);
