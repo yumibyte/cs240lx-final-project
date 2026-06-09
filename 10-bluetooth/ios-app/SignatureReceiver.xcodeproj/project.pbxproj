@@ -15,6 +15,7 @@
 		B2C3D4E5F60003DEADBEEF /* SignatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60004DEADBEEF /* SignatureViews.swift */; };
 		DA8B0995215FDF76C16C88A6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 559237FA0EEBEED6DBE81C8A /* ContentView.swift */; };
 		E737835CA84EA2382BD2DDC6 /* YearbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8D6D935B070B1729E73268 /* YearbookView.swift */; };
+		F1A2B3C4D5E60001CAFEBABE /* YearbookModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E60002CAFEBABE /* YearbookModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		A1B2C3D4E5F60002DEADBEEF /* ZipExtract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipExtract.swift; sourceTree = "<group>"; };
 		B2C3D4E5F60004DEADBEEF /* SignatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureViews.swift; sourceTree = "<group>"; };
 		DC8D6D935B070B1729E73268 /* YearbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YearbookView.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E60002CAFEBABE /* YearbookModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YearbookModel.swift; sourceTree = "<group>"; };
 		FC4FFFCE2A006943D36A7485 /* SignatureReceiverApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureReceiverApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -49,6 +51,7 @@
 				6F99C0FD93F6BB99C89D2185 /* SignatureBMP.swift */,
 				FC4FFFCE2A006943D36A7485 /* SignatureReceiverApp.swift */,
 				DC8D6D935B070B1729E73268 /* YearbookView.swift */,
+				F1A2B3C4D5E60002CAFEBABE /* YearbookModel.swift */,
 				A1B2C3D4E5F60002DEADBEEF /* ZipExtract.swift */,
 				B2C3D4E5F60004DEADBEEF /* SignatureViews.swift */,
 			);
@@ -138,6 +141,7 @@
 				7E56C5225FDE8F1A80ED09D6 /* SignatureBMP.swift in Sources */,
 				60ACE48515600F4AC2C0C781 /* SignatureReceiverApp.swift in Sources */,
 				E737835CA84EA2382BD2DDC6 /* YearbookView.swift in Sources */,
+				F1A2B3C4D5E60001CAFEBABE /* YearbookModel.swift in Sources */,
 				A1B2C3D4E5F60001DEADBEEF /* ZipExtract.swift in Sources */,
 				B2C3D4E5F60003DEADBEEF /* SignatureViews.swift in Sources */,
 			);

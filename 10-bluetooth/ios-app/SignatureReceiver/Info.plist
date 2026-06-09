@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connects to the CS240LX Raspberry Pi over Bluetooth to receive signature images.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Saves your yearbook collage to the Photos library.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

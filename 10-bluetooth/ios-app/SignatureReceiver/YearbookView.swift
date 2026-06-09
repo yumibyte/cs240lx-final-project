@@ -1,43 +1,90 @@
 import SwiftUI
 
-// Pannable, zoomable white canvas with every received signature laid out on it.
 struct YearbookView: View {
     @EnvironmentObject var ble: BLEManager
+    @EnvironmentObject var yearbook: YearbookStore
 
-    @State private var scale: CGFloat = 1
-    @State private var lastScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
+    @State private var canvasScale: CGFloat = 1
+    @State private var lastCanvasScale: CGFloat = 1
+    @State private var canvasOffset: CGSize = .zero
+    @State private var lastCanvasOffset: CGSize = .zero
 
-    private var entries: [SignatureEntry] {
-        ble.signatures.enumerated().map { SignatureEntry(id: $0.offset, image: $0.element) }
-    }
+    @State private var showRemovedSheet = false
+    @State private var saveMessage: String?
+    @State private var showSaveAlert = false
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                if entries.isEmpty {
+                if yearbook.placements.isEmpty && yearbook.removed.isEmpty && ble.signatures.isEmpty {
                     emptyState
                 } else {
-                    canvas(in: geo.size)
+                    editorCanvas(in: geo.size)
                 }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Yearbook")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if !entries.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Reset view") { resetView() }
-                    }
+            .toolbar { toolbarContent }
+            .safeAreaInset(edge: .bottom) {
+                if yearbook.selectedId != nil {
+                    editBar
                 }
+            }
+            .sheet(isPresented: $showRemovedSheet) {
+                removedSignaturesSheet
+            }
+            .alert("Yearbook", isPresented: $showSaveAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveMessage ?? "")
+            }
+            .onChange(of: ble.signatures.count) { _, new in
+                if new == 0 {
+                    yearbook.resetAll()
+                } else {
+                    yearbook.sync(signatures: ble.signatures)
+                }
+            }
+            .onAppear {
+                yearbook.sync(signatures: ble.signatures)
             }
         }
     }
 
-    private func canvas(in viewport: CGSize) -> some View {
-        let layout = YearbookLayout(entries: entries)
-        let canvasSize = layout.canvasSize
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            if !yearbook.removed.isEmpty {
+                Button {
+                    showRemovedSheet = true
+                } label: {
+                    Label("Add back", systemImage: "plus.circle")
+                }
+            }
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if !yearbook.placements.isEmpty {
+                Button {
+                    Task { await saveCollage() }
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                    }
+                }
+                .disabled(isSaving)
+            }
+            if !yearbook.placements.isEmpty {
+                Button("Reset view") { resetCanvasView() }
+            }
+        }
+    }
+
+    private func editorCanvas(in viewport: CGSize) -> some View {
+        let size = yearbook.canvasSize
 
         return ZStack {
             Color(.systemGroupedBackground)
@@ -45,67 +92,196 @@ struct YearbookView: View {
             ZStack(alignment: .topLeading) {
                 Rectangle()
                     .fill(Color.white)
-                    .frame(width: canvasSize.width, height: canvasSize.height)
+                    .frame(width: size.width, height: size.height)
                     .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+                    .onTapGesture { yearbook.select(nil) }
 
-                ForEach(entries) { entry in
-                    let frame = layout.frame(for: entry.id)
-                    let rot = layout.rotation(for: entry.id)
-                    Image(uiImage: entry.image)
-                        .resizable()
-                        .interpolation(.high)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: frame.width, height: frame.height)
-                        .rotationEffect(.degrees(rot))
-                        .position(x: frame.midX, y: frame.midY)
+                ForEach(yearbook.placements) { placement in
+                    if placement.signatureIndex < ble.signatures.count {
+                        placementView(placement)
+                    }
                 }
             }
-            .frame(width: canvasSize.width, height: canvasSize.height)
-            .scaleEffect(scale)
-            .offset(offset)
-            .gesture(canvasGestures)
+            .frame(width: size.width, height: size.height)
+            .scaleEffect(canvasScale)
+            .offset(canvasOffset)
+            .gesture(canvasPanGesture)
+            .simultaneousGesture(canvasPinchGesture)
             .onAppear {
-                fitCanvasToScreen(viewport: viewport, canvas: canvasSize)
+                fitCanvasToScreen(viewport: viewport, canvas: size)
             }
-            .onChange(of: entries.count) { _ in
-                fitCanvasToScreen(viewport: viewport, canvas: layout.canvasSize)
+            .onChange(of: yearbook.placements.count) { _, _ in
+                fitCanvasToScreen(viewport: viewport, canvas: yearbook.canvasSize)
             }
         }
     }
 
-    private var canvasGestures: some Gesture {
-        SimultaneousGesture(
-            MagnificationGesture()
-                .onChanged { value in
-                    scale = max(0.25, min(lastScale * value, 4))
+    private func placementView(_ placement: YearbookPlacement) -> some View {
+        let isSelected = yearbook.selectedId == placement.id
+        let image = ble.signatures[placement.signatureIndex].applyingInk(placement.ink)
+
+        return YearbookPlacementView(
+            image: image,
+            placement: placement,
+            isSelected: isSelected,
+            canvasScale: canvasScale,
+            onSelect: { yearbook.select(placement.id) },
+            onMove: { newCenter in
+                yearbook.updatePlacement(placement.id) { $0.center = newCenter }
+            },
+            onResize: { newWidth in
+                yearbook.updatePlacement(placement.id) {
+                    $0.width = min(480, max(48, newWidth))
                 }
-                .onEnded { _ in lastScale = scale },
-            DragGesture()
-                .onChanged { value in
-                    offset = CGSize(
-                        width: lastOffset.width + value.translation.width,
-                        height: lastOffset.height + value.translation.height
-                    )
-                }
-                .onEnded { _ in lastOffset = offset }
+            },
+            onSetRotation: { degrees in
+                yearbook.updatePlacement(placement.id) { $0.rotation = degrees }
+            }
         )
     }
 
-    private func fitCanvasToScreen(viewport: CGSize, canvas: CGSize) {
-        let fit = min(viewport.width / canvas.width, viewport.height / canvas.height) * 0.92
-        scale = fit
-        lastScale = fit
-        offset = .zero
-        lastOffset = .zero
+    private var canvasPanGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard yearbook.selectedId == nil else { return }
+                canvasOffset = CGSize(
+                    width: lastCanvasOffset.width + value.translation.width,
+                    height: lastCanvasOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastCanvasOffset = canvasOffset
+            }
     }
 
-    private func resetView() {
-        withAnimation(.spring(response: 0.35)) {
-            scale = 1
-            lastScale = 1
-            offset = .zero
-            lastOffset = .zero
+    private var canvasPinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                guard yearbook.selectedId == nil else { return }
+                canvasScale = max(0.25, min(lastCanvasScale * value, 4))
+            }
+            .onEnded { _ in
+                lastCanvasScale = canvasScale
+            }
+    }
+
+    private var editBar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                ForEach(SignatureInk.allCases) { ink in
+                    let selected = yearbook.selectedPlacement?.ink == ink
+                    Button {
+                        yearbook.setInk(ink)
+                    } label: {
+                        Circle()
+                            .fill(ink.color)
+                            .frame(width: 28, height: 28)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 3)
+                            )
+                    }
+                    .accessibilityLabel(ink.label)
+                }
+            }
+
+            HStack(spacing: 20) {
+                Button {
+                    yearbook.rotateSelected(by: -15)
+                } label: {
+                    Label("Rotate left", systemImage: "rotate.left")
+                }
+
+                Button {
+                    yearbook.rotateSelected(by: 15)
+                } label: {
+                    Label("Rotate right", systemImage: "rotate.right")
+                }
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    yearbook.deleteSelected()
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+            }
+            .font(.subheadline)
         }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private var removedSignaturesSheet: some View {
+        NavigationStack {
+            List(yearbook.removed) { item in
+                Button {
+                    yearbook.restore(item)
+                    showRemovedSheet = false
+                } label: {
+                    HStack {
+                        if item.signatureIndex < ble.signatures.count {
+                            Image(uiImage: ble.signatures[item.signatureIndex].applyingInk(item.ink))
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: 44)
+                        }
+                        Text("Signature \(item.signatureIndex + 1)")
+                        Spacer()
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundStyle(.accent)
+                    }
+                }
+            }
+            .navigationTitle("Add signature back")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showRemovedSheet = false }
+                }
+            }
+        }
+    }
+
+    private func fitCanvasToScreen(viewport: CGSize, canvas: CGSize) {
+        let fit = min(viewport.width / canvas.width, viewport.height / canvas.height) * 0.88
+        canvasScale = fit
+        lastCanvasScale = fit
+        canvasOffset = .zero
+        lastCanvasOffset = .zero
+    }
+
+    private func resetCanvasView() {
+        withAnimation(.spring(response: 0.35)) {
+            canvasScale = 1
+            lastCanvasScale = 1
+            canvasOffset = .zero
+            lastCanvasOffset = .zero
+            yearbook.select(nil)
+        }
+    }
+
+    private func saveCollage() async {
+        isSaving = true
+        defer { isSaving = false }
+        guard let image = CollageExporter.render(
+            placements: yearbook.placements,
+            signatures: ble.signatures,
+            canvasSize: yearbook.canvasSize
+        ) else {
+            saveMessage = "Could not render the collage."
+            showSaveAlert = true
+            return
+        }
+        let result = await CollageExporter.saveToPhotos(image)
+        switch result {
+        case .success:
+            saveMessage = "Saved to your Photos library."
+        case .failure(let error):
+            saveMessage = error.localizedDescription
+        }
+        showSaveAlert = true
     }
 
     private var emptyState: some View {
@@ -123,62 +299,80 @@ struct YearbookView: View {
     }
 }
 
-// Tight scrapbook-style collage: 3-column masonry, slight tilt per signature.
-private struct YearbookLayout {
-    let entries: [SignatureEntry]
-    let canvasSize: CGSize
-    private let frames: [Int: CGRect]
-    private let rotations: [Int: Double]
+// One signature on the canvas — tap to select, drag to move, pinch to resize/rotate.
+private struct YearbookPlacementView: View {
+    let image: UIImage
+    let placement: YearbookPlacement
+    let isSelected: Bool
+    let canvasScale: CGFloat
+    let onSelect: () -> Void
+    let onMove: (CGPoint) -> Void
+    let onResize: (CGFloat) -> Void
+    let onSetRotation: (Double) -> Void
 
-    init(entries: [SignatureEntry]) {
-        self.entries = entries
-        let margin: CGFloat = 16
-        let cols = 3
-        let hGap: CGFloat = 10
-        let vGap: CGFloat = 6
-        let pageW: CGFloat = 680
-        let colW = (pageW - margin * 2 - hGap * CGFloat(cols - 1)) / CGFloat(cols)
-        let sigAspect: CGFloat = 1024.0 / 512.0
-        let slotH = colW / sigAspect
+    @State private var dragOrigin: CGPoint?
+    @State private var resizeOrigin: CGFloat?
+    @State private var rotateStart: Double?
 
-        var computed = [Int: CGRect]()
-        var rots = [Int: Double]()
-        var colHeights = Array(repeating: margin, count: cols)
-        let colLeft: [CGFloat] = (0..<cols).map { i in
-            margin + CGFloat(i) * (colW + hGap)
-        }
-
-        for entry in entries {
-            let col = colHeights.enumerated().min(by: { $0.element < $1.element })!.offset
-            let wobble = CGFloat((entry.id * 5) % 7) - 3
-            let y = colHeights[col] + slotH / 2
-            let x = colLeft[col] + colW / 2 + wobble
-            computed[entry.id] = CGRect(
-                x: x - colW / 2,
-                y: y - slotH / 2,
-                width: colW,
-                height: slotH
-            )
-            rots[entry.id] = Double((entry.id * 11) % 15) - 7
-            colHeights[col] += slotH + vGap
-        }
-
-        let contentH = (colHeights.max() ?? margin) + margin
-        self.frames = computed
-        self.rotations = rots
-        self.canvasSize = CGSize(width: pageW, height: max(contentH, 400))
+    var body: some View {
+        Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: placement.width, height: placement.height)
+            .rotationEffect(.degrees(placement.rotation))
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .padding(-4)
+                }
+            }
+            .position(x: placement.center.x, y: placement.center.y)
+            .onTapGesture { onSelect() }
+            .gesture(moveGesture)
+            .simultaneousGesture(resizeGesture)
+            .simultaneousGesture(rotateGesture)
     }
 
-    func frame(for id: Int) -> CGRect {
-        frames[id] ?? .zero
+    private var moveGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard isSelected else { return }
+                if dragOrigin == nil { dragOrigin = placement.center }
+                guard let start = dragOrigin else { return }
+                let dx = value.translation.width / canvasScale
+                let dy = value.translation.height / canvasScale
+                onMove(CGPoint(x: start.x + dx, y: start.y + dy))
+            }
+            .onEnded { _ in dragOrigin = nil }
     }
 
-    func rotation(for id: Int) -> Double {
-        rotations[id] ?? 0
+    private var resizeGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                guard isSelected else { return }
+                if resizeOrigin == nil { resizeOrigin = placement.width }
+                guard let start = resizeOrigin else { return }
+                onResize(start * value)
+            }
+            .onEnded { _ in resizeOrigin = nil }
+    }
+
+    private var rotateGesture: some Gesture {
+        RotationGesture()
+            .onChanged { angle in
+                guard isSelected else { return }
+                if rotateStart == nil { rotateStart = placement.rotation }
+                guard let start = rotateStart else { return }
+                onSetRotation(start + angle.degrees)
+            }
+            .onEnded { _ in rotateStart = nil }
     }
 }
 
 #Preview {
     YearbookView()
         .environmentObject(BLEManager())
+        .environmentObject(YearbookStore())
 }

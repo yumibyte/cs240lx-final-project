@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct SignatureReceiverApp: App {
     @StateObject private var ble = BLEManager()
+    @StateObject private var yearbook = YearbookStore()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(ble)
+                .environmentObject(yearbook)
         }
     }
 }
