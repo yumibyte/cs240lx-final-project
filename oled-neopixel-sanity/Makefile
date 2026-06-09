@@ -1,6 +1,7 @@
 PROGS = main.c
 
-WS2812_DIR = ../../11-ws2812b/1-code
+WS2812_DIR = ../../labs/11-ws2812b/1-code
+WS2812_TIMING_DIR = ../../labs/11-ws2812b/0-timing
 BT_DIR = ../10-bluetooth/code
 
 COMMON_SRC = libs/display/ssd1306-display-driver.c
@@ -31,7 +32,7 @@ O := $(CS240LX_2026_PATH)/libpi
 STAFF_OBJS += $(O)/staff-objs/staff-kmalloc.o
 
 LIB_INC = -Ilibs/i2c -Ilibs/display -Ilibs/sd -Ilibs/fat32 -Ilibs/neopixel
-INC += -I$(WS2812_DIR) -I$(BT_DIR) $(LIB_INC)
+INC += -I$(WS2812_DIR) -I$(WS2812_TIMING_DIR) -I$(BT_DIR) $(LIB_INC)
 OPT_LEVEL = -O2
 CFLAGS_EXTRA += -Wno-strict-aliasing
 CFLAGS_EXTRA += -Ilibs/fat32/miniz -include libs/fat32/miniz-port.h

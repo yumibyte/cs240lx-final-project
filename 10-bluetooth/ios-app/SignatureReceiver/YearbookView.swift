@@ -43,7 +43,6 @@ struct YearbookView: View {
             Color(.systemGroupedBackground)
 
             ZStack(alignment: .topLeading) {
-                // Large white page
                 Rectangle()
                     .fill(Color.white)
                     .frame(width: canvasSize.width, height: canvasSize.height)
@@ -51,11 +50,13 @@ struct YearbookView: View {
 
                 ForEach(entries) { entry in
                     let frame = layout.frame(for: entry.id)
+                    let rot = layout.rotation(for: entry.id)
                     Image(uiImage: entry.image)
                         .resizable()
                         .interpolation(.high)
                         .aspectRatio(contentMode: .fit)
                         .frame(width: frame.width, height: frame.height)
+                        .rotationEffect(.degrees(rot))
                         .position(x: frame.midX, y: frame.midY)
                 }
             }
@@ -122,47 +123,58 @@ struct YearbookView: View {
     }
 }
 
-// Lays signatures out on a large white page in a loose yearbook collage.
+// Tight scrapbook-style collage: 3-column masonry, slight tilt per signature.
 private struct YearbookLayout {
     let entries: [SignatureEntry]
     let canvasSize: CGSize
     private let frames: [Int: CGRect]
+    private let rotations: [Int: Double]
 
     init(entries: [SignatureEntry]) {
         self.entries = entries
-        let margin: CGFloat = 48
-        let colWidth: CGFloat = 320
-        let colGap: CGFloat = 40
-        let rowGap: CGFloat = 36
-        let thumbHeight: CGFloat = 140
+        let margin: CGFloat = 16
+        let cols = 3
+        let hGap: CGFloat = 10
+        let vGap: CGFloat = 6
+        let pageW: CGFloat = 680
+        let colW = (pageW - margin * 2 - hGap * CGFloat(cols - 1)) / CGFloat(cols)
+        let sigAspect: CGFloat = 1024.0 / 512.0
+        let slotH = colW / sigAspect
 
         var computed = [Int: CGRect]()
-        var colHeights = [CGFloat(0), CGFloat(0)]
-        let colX = [margin + colWidth / 2, margin + colWidth + colGap + colWidth / 2]
-
-        for entry in entries {
-            let col = colHeights[0] <= colHeights[1] ? 0 : 1
-            let y = margin + colHeights[col] + thumbHeight / 2
-            let x = colX[col]
-            computed[entry.id] = CGRect(
-                x: x - colWidth / 2,
-                y: y - thumbHeight / 2,
-                width: colWidth,
-                height: thumbHeight
-            )
-            colHeights[col] += thumbHeight + rowGap
+        var rots = [Int: Double]()
+        var colHeights = Array(repeating: margin, count: cols)
+        let colLeft: [CGFloat] = (0..<cols).map { i in
+            margin + CGFloat(i) * (colW + hGap)
         }
 
-        let contentH = max(colHeights[0], colHeights[1]) + margin
+        for entry in entries {
+            let col = colHeights.enumerated().min(by: { $0.element < $1.element })!.offset
+            let wobble = CGFloat((entry.id * 5) % 7) - 3
+            let y = colHeights[col] + slotH / 2
+            let x = colLeft[col] + colW / 2 + wobble
+            computed[entry.id] = CGRect(
+                x: x - colW / 2,
+                y: y - slotH / 2,
+                width: colW,
+                height: slotH
+            )
+            rots[entry.id] = Double((entry.id * 11) % 15) - 7
+            colHeights[col] += slotH + vGap
+        }
+
+        let contentH = (colHeights.max() ?? margin) + margin
         self.frames = computed
-        self.canvasSize = CGSize(
-            width: margin * 2 + colWidth * 2 + colGap,
-            height: max(contentH, 600)
-        )
+        self.rotations = rots
+        self.canvasSize = CGSize(width: pageW, height: max(contentH, 400))
     }
 
     func frame(for id: Int) -> CGRect {
         frames[id] ?? .zero
+    }
+
+    func rotation(for id: Int) -> Double {
+        rotations[id] ?? 0
     }
 }
 

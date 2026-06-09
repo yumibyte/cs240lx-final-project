@@ -16,13 +16,13 @@
 enum {
   pix_pin = 21,
   npixels = 64,
-  poll_ms = 6,
+  poll_ms = 1,
   tree_show_ms = 8000,
   scroll_step_ms = 75,
   go_trees_split = 3,
   go_trees_blink_char = 8,
-  sig_grace_ms = 5000,
-  sig_countdown_secs = 5,
+  sig_grace_ms = 1500,
+  sig_countdown_secs = 2,
   sig_sent_show_ms = 2000,
   ble_blink_ms = 500,
   ble_name_corner_w = 14,
@@ -91,7 +91,7 @@ static void map_touch_to_pixel(uint16_t touch_x, uint16_t touch_y, uint32_t widt
 
 static uint16_t tsc2007_cmd(uint8_t cmd) {
   i2c_write(TSC2007_ADDR, &cmd, 1);
-  delay_us(500);
+  delay_us(200);
   uint8_t raw[2];
   i2c_read(TSC2007_ADDR, raw, 2);
   return ((uint16_t)raw[0] << 4) | (raw[1] >> 4);
@@ -186,17 +186,13 @@ static void oled_show_waiting(void) {
 }
 
 static void oled_show_countdown(unsigned sec_left) {
+  const char *msg = "1...";
+  if(sec_left >= 2)
+    msg = "Sending in 2";
+  else if(sec_left >= 1)
+    msg = "1...";
   ssd1306_display_clear();
-  if(sec_left >= 5)
-    ssd1306_display_draw_string_centered(28, "Sending in 5", COLOR_WHITE);
-  else if(sec_left == 4)
-    ssd1306_display_draw_string_centered(28, "4...", COLOR_WHITE);
-  else if(sec_left == 3)
-    ssd1306_display_draw_string_centered(28, "3...", COLOR_WHITE);
-  else if(sec_left == 2)
-    ssd1306_display_draw_string_centered(28, "2...", COLOR_WHITE);
-  else
-    ssd1306_display_draw_string_centered(28, "1...", COLOR_WHITE);
+  ssd1306_display_draw_string_centered(28, msg, COLOR_WHITE);
   oled_flush();
 }
 

@@ -42,6 +42,7 @@ final class BLEManager: NSObject, ObservableObject {
     private var expectedTotal = 0
     private var nextImageToFetch = 0
     private var lastProgressUpdate = 0
+    private var pendingFetchAll = false
 
     override init() {
         super.init()
@@ -108,21 +109,27 @@ final class BLEManager: NSObject, ObservableObject {
         statusText = "Requesting image \(id)..."
     }
 
-    // Pull every image the Pi reports (simple sequential fetch).
     func fetchAll() {
-        guard imageCountOnPi > 0 else {
-            requestList()
-            return
-        }
-        signatures.removeAll()
-        requestImage(0)
+        pendingFetchAll = true
+        requestList()
+        statusText = "Checking Pi for signatures..."
     }
 
     private func handleFrame(_ f: CS24.Frame) {
         switch f.cmd {
         case CS24.rspList:
             imageCountOnPi = Int(f.total)
-            statusText = "Pi has \(imageCountOnPi) image(s)"
+            if pendingFetchAll {
+                pendingFetchAll = false
+                if imageCountOnPi > 0 {
+                    signatures.removeAll()
+                    requestImage(0)
+                } else {
+                    statusText = "Pi has no signatures yet — draw one first"
+                }
+            } else {
+                statusText = "Pi has \(imageCountOnPi) image(s)"
+            }
 
         case CS24.rspPushChunk:
             if f.offset == 0 {
