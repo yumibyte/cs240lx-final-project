@@ -40,7 +40,7 @@ struct YearbookView: View {
             } message: {
                 Text(saveMessage ?? "")
             }
-            .onChange(of: ble.signatures.count) { _, new in
+            .onChange(of: ble.signatures.count) { new in
                 if new == 0 {
                     yearbook.resetAll()
                 } else {
@@ -110,7 +110,7 @@ struct YearbookView: View {
             .onAppear {
                 fitCanvasToScreen(viewport: viewport, canvas: size)
             }
-            .onChange(of: yearbook.placements.count) { _, _ in
+            .onChange(of: yearbook.placements.count) { _ in
                 fitCanvasToScreen(viewport: viewport, canvas: yearbook.canvasSize)
             }
         }
@@ -118,7 +118,11 @@ struct YearbookView: View {
 
     private func placementView(_ placement: YearbookPlacement) -> some View {
         let isSelected = yearbook.selectedId == placement.id
-        let image = ble.signatures[placement.signatureIndex].applyingInk(placement.ink)
+        let image = yearbook.displayImage(
+            for: placement.signatureIndex,
+            signatures: ble.signatures,
+            ink: placement.ink
+        ) ?? ble.signatures[placement.signatureIndex]
 
         return YearbookPlacementView(
             image: image,
@@ -214,24 +218,14 @@ struct YearbookView: View {
     }
 
     private var removedSignaturesSheet: some View {
-        NavigationStack {
-            List(yearbook.removed) { item in
+        let removedItems = yearbook.removed
+        return NavigationStack {
+            List(removedItems, id: \.id) { (item: YearbookPlacement) in
                 Button {
                     yearbook.restore(item)
                     showRemovedSheet = false
                 } label: {
-                    HStack {
-                        if item.signatureIndex < ble.signatures.count {
-                            Image(uiImage: ble.signatures[item.signatureIndex].applyingInk(item.ink))
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 44)
-                        }
-                        Text("Signature \(item.signatureIndex + 1)")
-                        Spacer()
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(.accent)
-                    }
+                    removedRow(item)
                 }
             }
             .navigationTitle("Add signature back")
@@ -241,6 +235,26 @@ struct YearbookView: View {
                     Button("Done") { showRemovedSheet = false }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func removedRow(_ item: YearbookPlacement) -> some View {
+        HStack {
+            if let img = yearbook.displayImage(
+                for: item.signatureIndex,
+                signatures: ble.signatures,
+                ink: item.ink
+            ) {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 44)
+            }
+            Text("Signature \(item.signatureIndex + 1)")
+            Spacer()
+            Image(systemName: "plus.circle.fill")
+                .foregroundStyle(Color.accentColor)
         }
     }
 
@@ -267,6 +281,7 @@ struct YearbookView: View {
         defer { isSaving = false }
         guard let image = CollageExporter.render(
             placements: yearbook.placements,
+            store: yearbook,
             signatures: ble.signatures,
             canvasSize: yearbook.canvasSize
         ) else {
