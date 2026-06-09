@@ -11,12 +11,21 @@ typedef enum {
     LED_GFX_TREE,
 } led_gfx_mode_t;
 
+typedef enum {
+    LED_GFX_TRANS_NONE = 0,
+    LED_GFX_TRANS_WIPE,
+    LED_GFX_TRANS_RED_DOT_SWEEP,
+} led_gfx_trans_t;
+
 typedef struct {
     led_matrix_t matrix;
     led_gfx_mode_t mode;
     led_scroll_t scroll;
     led_tree_t tree;
     uint32_t scroll_last_usec;
+    led_gfx_trans_t trans;
+    unsigned trans_step;
+    uint32_t trans_last_usec;
 } led_gfx_t;
 
 led_gfx_t led_gfx_init(uint8_t pin, unsigned npixels);
@@ -40,6 +49,16 @@ void led_gfx_set_tree(led_gfx_t *gfx, const uint8_t rows[LED_MATRIX_HEIGHT],
 void led_gfx_set_tree_default(led_gfx_t *gfx);
 
 void led_gfx_show(led_gfx_t *gfx);
+
+void led_gfx_start_wipe(led_gfx_t *gfx);
+
+void led_gfx_start_red_dot_sweep(led_gfx_t *gfx);
+
+int led_gfx_tick_transition(led_gfx_t *gfx);
+
+void led_gfx_tick_tree_sparkle(led_gfx_t *gfx);
+
+void led_gfx_tick_scroll_anim(led_gfx_t *gfx);
 
 void led_gfx_tick_scroll(led_gfx_t *gfx);
 

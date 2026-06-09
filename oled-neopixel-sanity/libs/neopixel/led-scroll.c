@@ -22,11 +22,11 @@ static void glyph_column(unsigned char character, unsigned column,
     }
 }
 
-// total number of columns to scroll
-static unsigned scroll_total_cols(const led_scroll_t *scroll) {
+// columns until the message has fully scrolled off the left edge
+static unsigned scroll_end_col(const led_scroll_t *scroll) {
     if(scroll->msg_len == 0)
         return LED_MATRIX_WIDTH;
-    return scroll->msg_len * LED_SCROLL_COLS_PER_CHAR + LED_MATRIX_WIDTH;
+    return scroll->msg_len * LED_SCROLL_COLS_PER_CHAR;
 }
 
 // start the scroll
@@ -47,6 +47,9 @@ void led_scroll_start(led_scroll_t *scroll, const char *msg, uint8_t red,
     scroll->step_ms = LED_SCROLL_STEP_MS_DEFAULT;
     scroll->color = (led_rgb_t){ .r = red, .g = green, .b = blue };
     scroll->color_split = 0;
+    scroll->blink_char = LED_SCROLL_NO_BLINK;
+    scroll->blink_on = 1;
+    scroll->blink_last_usec = timer_get_usec();
 }
 
 void led_scroll_start_split(led_scroll_t *scroll, const char *msg,
@@ -61,6 +64,25 @@ void led_scroll_start_split(led_scroll_t *scroll, const char *msg,
 
 void led_scroll_set_step_ms(led_scroll_t *scroll, unsigned step_ms) {
     scroll->step_ms = step_ms;
+}
+
+void led_scroll_set_blink_char(led_scroll_t *scroll, unsigned char_index) {
+    scroll->blink_char = char_index;
+    scroll->blink_on = 1;
+    scroll->blink_last_usec = timer_get_usec();
+}
+
+void led_scroll_blink_tick(led_scroll_t *scroll) {
+    if(scroll->blink_char == LED_SCROLL_NO_BLINK
+            || scroll->blink_char >= scroll->msg_len)
+        return;
+
+    uint32_t now = timer_get_usec();
+    if(now - scroll->blink_last_usec < (uint32_t)LED_SCROLL_BLINK_MS * 1000)
+        return;
+
+    scroll->blink_last_usec = now;
+    scroll->blink_on = !scroll->blink_on;
 }
 
 void led_scroll_render(led_matrix_t *matrix, led_scroll_t *scroll) {
@@ -93,6 +115,9 @@ void led_scroll_render(led_matrix_t *matrix, led_scroll_t *scroll) {
         if(scroll->color_split > 0 && char_index >= scroll->color_split)
             color = &scroll->color_alt;
 
+        if(char_index == scroll->blink_char && !scroll->blink_on)
+            continue;
+
         for(unsigned y = 0; y < LED_MATRIX_HEIGHT; y++) {
             if(rows[y])
                 led_matrix_set_pixel(matrix, x, y, color->r, color->g, color->b);
@@ -101,9 +126,9 @@ void led_scroll_render(led_matrix_t *matrix, led_scroll_t *scroll) {
 }
 
 int led_scroll_step(led_scroll_t *scroll) {
-    unsigned total = scroll_total_cols(scroll);
+    unsigned end_col = scroll_end_col(scroll);
     scroll->scroll_col++;
-    if(scroll->scroll_col >= total) {
+    if(scroll->scroll_col >= end_col) {
         scroll->scroll_col = 0;
         return 1;
     }

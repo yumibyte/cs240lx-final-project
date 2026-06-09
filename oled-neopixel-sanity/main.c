@@ -13,10 +13,11 @@
 enum {
   pix_pin = 21,
   npixels = 64,
-  poll_ms = 50,
-  tree_show_ms = 5000,
-  scroll_step_ms = 600,
+  poll_ms = 6,
+  tree_show_ms = 8000,
+  scroll_step_ms = 75,
   go_trees_split = 3,
+  go_trees_blink_char = 8,
 };
 
 static const led_rgb_t go_red = {
@@ -33,26 +34,39 @@ static const led_rgb_t trees_forest_green = {
 
 enum {
   phase_tree = 0,
-  phase_go_trees = 1,
-  phase_cs240lx = 2,
+  phase_transition = 1,
+  phase_go_trees = 2,
+  phase_cs240lx = 3,
 };
 
 static void matrix_show_go_trees(led_gfx_t *gfx) {
   led_gfx_set_scroll_text_split_timed(gfx, "Go Trees!", &go_red,
                                       &trees_forest_green, go_trees_split,
                                       scroll_step_ms);
-  led_gfx_show(gfx);
+  led_scroll_set_blink_char(&gfx->scroll, go_trees_blink_char);
 }
 
 static void matrix_show_cs240lx(led_gfx_t *gfx) {
   led_gfx_set_scroll_text_timed(gfx, "CS240LX", 0, 0, LED_MAX_BRIGHT,
                                 scroll_step_ms);
-  led_gfx_show(gfx);
 }
 
 static void matrix_show_tree(led_gfx_t *gfx) {
   led_gfx_set_tree_default(gfx);
-  led_gfx_show(gfx);
+}
+
+static void matrix_begin_wipe(led_gfx_t *gfx, int *cycle_phase_out,
+                              int *pending_phase_out, int next_phase) {
+  led_gfx_start_wipe(gfx);
+  *pending_phase_out = next_phase;
+  *cycle_phase_out = phase_transition;
+}
+
+static void matrix_begin_red_dot_sweep(led_gfx_t *gfx, int *cycle_phase_out,
+                                       int *pending_phase_out, int next_phase) {
+  led_gfx_start_red_dot_sweep(gfx);
+  *pending_phase_out = next_phase;
+  *cycle_phase_out = phase_transition;
 }
 
 static void map_touch_to_pixel(uint16_t touch_x, uint16_t touch_y, uint32_t width,
@@ -128,31 +142,41 @@ void notmain(void) {
   led_gfx_t gfx = led_gfx_init(pix_pin, npixels);
 
   matrix_show_tree(&gfx);
+  led_gfx_show(&gfx);
   output("matrix cycle: tree -> Go Trees! -> CS240LX\n");
 
   int cycle_phase = phase_tree;
+  int pending_phase = phase_tree;
   uint32_t phase_start_usec = timer_get_usec();
 
   unsigned point_count = 0;
   while (1) {
-    if(cycle_phase == phase_tree) {
+    if(cycle_phase == phase_transition) {
+      if(led_gfx_tick_transition(&gfx)) {
+        cycle_phase = pending_phase;
+        if(cycle_phase == phase_tree)
+          phase_start_usec = timer_get_usec();
+      }
+    } else if(cycle_phase == phase_tree) {
+      led_gfx_tick_tree_sparkle(&gfx);
       uint32_t elapsed = timer_get_usec() - phase_start_usec;
       if(elapsed >= (uint32_t)tree_show_ms * 1000) {
         matrix_show_go_trees(&gfx);
-        cycle_phase = phase_go_trees;
+        matrix_begin_red_dot_sweep(&gfx, &cycle_phase, &pending_phase,
+                                   phase_go_trees);
         output("matrix scroll: Go Trees!\n");
       }
     } else if(cycle_phase == phase_go_trees) {
+      led_gfx_tick_scroll_anim(&gfx);
       if(led_gfx_tick_scroll_pass(&gfx)) {
         matrix_show_cs240lx(&gfx);
-        cycle_phase = phase_cs240lx;
+        matrix_begin_wipe(&gfx, &cycle_phase, &pending_phase, phase_cs240lx);
         output("matrix scroll: CS240LX\n");
       }
     } else {
       if(led_gfx_tick_scroll_pass(&gfx)) {
         matrix_show_tree(&gfx);
-        cycle_phase = phase_tree;
-        phase_start_usec = timer_get_usec();
+        matrix_begin_wipe(&gfx, &cycle_phase, &pending_phase, phase_tree);
         output("matrix: tree\n");
       }
     }

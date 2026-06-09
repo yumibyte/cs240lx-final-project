@@ -67,3 +67,51 @@ void led_tree_render(led_matrix_t *matrix, const led_tree_t *tree) {
     tree_render_rows(matrix, tree->leaf_rows, &tree->leaf);
     tree_render_rows(matrix, tree->trunk_rows, &tree->trunk);
 }
+
+static led_rgb_t tree_hue_blend(unsigned phase, unsigned pixel_offset) {
+    static const led_rgb_t palette[] = {
+        { 0,  LED_MAX_BRIGHT, 0 },
+        { 8,  28, 0 },
+        { 4,  22, 2 },
+        { 2,  18, 0 },
+        { 10, 26, 0 },
+        { 0,  24, 6 },
+    };
+    enum { palette_count = 6 };
+
+    unsigned hue = (phase + pixel_offset) % 256;
+    unsigned idx = hue * palette_count / 256;
+    unsigned next = (idx + 1) % palette_count;
+    unsigned blend = (hue * palette_count) % 256;
+
+    led_rgb_t first = palette[idx];
+    led_rgb_t second = palette[next];
+    return (led_rgb_t){
+        .r = (uint8_t)(first.r + (second.r - first.r) * (int)blend / 256),
+        .g = (uint8_t)(first.g + (second.g - first.g) * (int)blend / 256),
+        .b = (uint8_t)(first.b + (second.b - first.b) * (int)blend / 256),
+    };
+}
+
+void led_tree_render_sparkle(led_matrix_t *matrix, const led_tree_t *tree,
+                             uint32_t seed) {
+    enum { tree_hue_cycle_us = 4000000 };
+    unsigned phase = (unsigned)((seed % tree_hue_cycle_us) * 256 / tree_hue_cycle_us);
+
+    led_matrix_clear(matrix);
+    tree_render_rows(matrix, tree->trunk_rows, &tree->trunk);
+
+    for(unsigned y = 0; y < LED_MATRIX_HEIGHT; y++) {
+        uint8_t row_bits = tree->leaf_rows[y];
+
+        for(unsigned x = 0; x < LED_MATRIX_WIDTH; x++) {
+            unsigned shift = LED_MATRIX_WIDTH - 1 - x;
+            if(((row_bits >> shift) & 1) == 0)
+                continue;
+
+            unsigned pixel_offset = (x * 17 + y * 31) % 64;
+            led_rgb_t color = tree_hue_blend(phase, pixel_offset);
+            led_matrix_set_pixel(matrix, x, y, color.r, color.g, color.b);
+        }
+    }
+}
