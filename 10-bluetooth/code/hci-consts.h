@@ -86,6 +86,18 @@ enum hci_event {
     EVENT_VENDOR_SPECIFIC_EVENT                             = 0xFF,
 };
 
+// LE Meta event subevent codes. (Vol 4, Part E, 7.7.65.)
+enum hci_le_subevent {
+    LE_EVENT_CONNECTION_COMPLETE                            = 0x01,
+    LE_EVENT_ADVERTISING_REPORT                             = 0x02,
+    LE_EVENT_CONNECTION_UPDATE_COMPLETE                     = 0x03,
+    LE_EVENT_READ_REMOTE_USED_FEATURES_COMPLETE            = 0x04,
+    LE_EVENT_LONG_TERM_KEY_REQUEST                          = 0x05,
+    LE_EVENT_REMOTE_CONNECTION_PARAMETER_REQUEST           = 0x06,
+    LE_EVENT_DATA_LENGTH_CHANGE                             = 0x07,
+    LE_EVENT_ENHANCED_CONNECTION_COMPLETE                   = 0x0A,
+};
+
 
 enum hci_ogf {
     LINK_CONTROL_OGF                = 0x01,
@@ -124,9 +136,12 @@ enum hci_opcode {
     CMD_READ_BD_ADDR                    = OPCODE(INFORMATIONAL_PARAMETERS_OGF, 0x09),
 
     CMD_LE_SET_EVENT_MASK                       = OPCODE(LOW_ENERGY_OGF, 0x01),
+    CMD_LE_READ_BUFFER_SIZE                     = OPCODE(LOW_ENERGY_OGF, 0x02),
+    CMD_LE_SET_RANDOM_ADDRESS                   = OPCODE(LOW_ENERGY_OGF, 0x05),
     CMD_LE_SET_ADVERTISING_PARAMETERS           = OPCODE(LOW_ENERGY_OGF, 0x06),
     CMD_LE_READ_ADVERTISING_CHANNEL_TX_POWER    = OPCODE(LOW_ENERGY_OGF, 0x07),
     CMD_LE_SET_ADVERTISING_DATA                 = OPCODE(LOW_ENERGY_OGF, 0x08),
+    CMD_LE_SET_SCAN_RESPONSE_DATA               = OPCODE(LOW_ENERGY_OGF, 0x09),
     CMD_LE_SET_ADVERTISE_ENABLE                 = OPCODE(LOW_ENERGY_OGF, 0x0A),
     CMD_LE_SET_SCAN_PARAMETERS                  = OPCODE(LOW_ENERGY_OGF, 0x0B),
     CMD_LE_SET_SCAN_ENABLE                      = OPCODE(LOW_ENERGY_OGF, 0x0C),

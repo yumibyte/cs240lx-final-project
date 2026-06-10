@@ -1,0 +1,6 @@
+Upstream: https://github.com/richgel999/miniz 
+
+Files ripped from that repo:
+  miniz.c, miniz_tdef.c, miniz.h, miniz_tdef.h, miniz_common.h,
+  miniz_tinfl.h, miniz_zip.h, miniz_export.h
+

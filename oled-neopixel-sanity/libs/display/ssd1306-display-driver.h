@@ -62,4 +62,17 @@ void ssd1306_display_draw_character_size(uint16_t x, uint16_t y,
                                          unsigned char c, color_t color,
                                          uint8_t size_x, uint8_t size_y);
 
+void ssd1306_display_snapshot_save(uint8_t buf[SSD1306_DISPLAY_BUFFER_SIZE]);
+
+void ssd1306_display_snapshot_restore(const uint8_t buf[SSD1306_DISPLAY_BUFFER_SIZE]);
+
+void ssd1306_display_draw_string(uint16_t x, uint16_t y, const char *msg,
+                                 color_t color);
+
+void ssd1306_display_draw_string_centered(uint16_t y, const char *msg,
+                                          color_t color);
+
+void ssd1306_display_show_message_lines(const char *line1, const char *line2,
+                                        color_t color);
+
 #endif

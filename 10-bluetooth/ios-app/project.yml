@@ -1,0 +1,31 @@
+name: SignatureReceiver
+options:
+  bundleIdPrefix: edu.stanford.cs240lx
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  SignatureReceiver:
+    type: application
+    platform: iOS
+    sources:
+      - SignatureReceiver
+    info:
+      path: SignatureReceiver/Info.plist
+      properties:
+        CFBundleDisplayName: Pi Signatures
+        UILaunchScreen: {}
+        NSBluetoothAlwaysUsageDescription: >-
+          Connects to the CS240LX Raspberry Pi over Bluetooth to receive
+          signature images.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+        # Set your Apple ID team in Xcode (Signing & Capabilities), or
+        # replace YOUR_TEAM_ID with the 10-char id from developer.apple.com:
+        # DEVELOPMENT_TEAM: YOUR_TEAM_ID
