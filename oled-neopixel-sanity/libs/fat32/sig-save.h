@@ -134,7 +134,7 @@ void sig_draw_point(uint16_t tx, uint16_t ty) {
 
 // Render sig_pixels as a 24-bit BMP, zip it, and write SIG###.ZIP to the SD card.
 // The archive contains SIG###.BMP (deflate-compressed).
-// Call when button is pressed or timeout fires, then call sig_clear().
+// Call when the 'done' button is pressed
 void sig_save(void) {
     char zip_name[12] = "SIG000.ZIP";
     char bmp_name[12] = "SIG000.BMP";

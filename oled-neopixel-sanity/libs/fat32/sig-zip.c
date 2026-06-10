@@ -1,3 +1,4 @@
+// single-entry ZIP writer; deflate via vendored miniz (miniz/SOURCE)
 #include "sig-zip.h"
 #include "miniz.h"
 

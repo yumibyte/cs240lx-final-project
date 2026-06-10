@@ -1,12 +1,14 @@
 PROGS = main.c
 
-WS2812_DIR = ../../labs/11-ws2812b/1-code
-WS2812_TIMING_DIR = ../../labs/11-ws2812b/0-timing
+WS2812_DIR = ../../11-ws2812b/1-code
+WS2812_TIMING_DIR = ../../11-ws2812b/0-timing
 BT_DIR = ../10-bluetooth/code
 
 COMMON_SRC = libs/display/ssd1306-display-driver.c
 COMMON_SRC += libs/display/standard-ascii-font.c
 COMMON_SRC += libs/i2c/i2c.c
+COMMON_SRC += libs/input/button.c
+COMMON_SRC += libs/pot/pot-mcp3008.c
 COMMON_SRC += libs/neopixel/led-matrix.c
 COMMON_SRC += libs/neopixel/led-scroll.c
 COMMON_SRC += libs/neopixel/led-tree.c
@@ -30,8 +32,9 @@ COMMON_SRC += $(BT_DIR)/BCM43430A1.c
 
 O := $(CS240LX_2026_PATH)/libpi
 STAFF_OBJS += $(O)/staff-objs/staff-kmalloc.o
+STAFF_OBJS += $(O)/staff-objs/staff-hw-spi.o
 
-LIB_INC = -Ilibs/i2c -Ilibs/display -Ilibs/sd -Ilibs/fat32 -Ilibs/neopixel
+LIB_INC = -Ilibs/i2c -Ilibs/input -Ilibs/pot -Ilibs/display -Ilibs/sd -Ilibs/fat32 -Ilibs/neopixel
 INC += -I$(WS2812_DIR) -I$(WS2812_TIMING_DIR) -I$(BT_DIR) $(LIB_INC)
 OPT_LEVEL = -O2
 CFLAGS_EXTRA += -Wno-strict-aliasing

@@ -1,4 +1,6 @@
 #pragma once
+// bare-metal build flags for vendored miniz — see miniz/SOURCE, it was basically
+// just ripped from there
 
 void *kmalloc(unsigned nbytes);
 

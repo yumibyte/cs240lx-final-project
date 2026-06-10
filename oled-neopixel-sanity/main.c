@@ -5,6 +5,8 @@
 #include "sig-save.h"
 #include "ble.h"
 #include "ble_xfer.h"
+#include "button.h"
+#include "pot-mcp3008.h"
 
 #define TSC2007_ADDR 0x48
 #define CMD_Z1 0xE4
@@ -15,18 +17,27 @@
 
 enum {
   pix_pin = 21,
+  done_pin = 17,
+  mode_pin = 27,
   npixels = 64,
-  poll_ms = 1,
-  tree_show_ms = 8000,
+  poll_ms = 6,
   scroll_step_ms = 75,
+  scroll_step_ms_min = 25,
+  scroll_step_ms_max = 200,
   go_trees_split = 3,
   go_trees_blink_char = 8,
-  sig_grace_ms = 1500,
-  sig_countdown_secs = 2,
   sig_sent_show_ms = 2000,
   ble_blink_ms = 500,
   ble_name_corner_w = 14,
   ble_name_corner_h = 7,
+  pot_poll_ms = 50,
+};
+
+enum {
+  led_mode_tree = 0,
+  led_mode_go_trees = 1,
+  led_mode_cs240lx = 2,
+  led_mode_count = 3,
 };
 
 static struct ble_conn g_ble_conn;
@@ -45,13 +56,6 @@ static const led_rgb_t trees_forest_green = {
     .b = 0,
 };
 
-enum {
-  phase_tree = 0,
-  phase_transition = 1,
-  phase_go_trees = 2,
-  phase_cs240lx = 3,
-};
-
 static void matrix_show_go_trees(led_gfx_t *gfx) {
   led_gfx_set_scroll_text_split_timed(gfx, "Go Trees!", &go_red,
                                       &trees_forest_green, go_trees_split,
@@ -68,18 +72,31 @@ static void matrix_show_tree(led_gfx_t *gfx) {
   led_gfx_set_tree_default(gfx);
 }
 
-static void matrix_begin_wipe(led_gfx_t *gfx, int *cycle_phase_out,
-                              int *pending_phase_out, int next_phase) {
-  led_gfx_start_wipe(gfx);
-  *pending_phase_out = next_phase;
-  *cycle_phase_out = phase_transition;
+static void apply_led_mode(led_gfx_t *gfx, int mode, unsigned scroll_ms) {
+  switch(mode) {
+  case led_mode_tree:
+    matrix_show_tree(gfx);
+    break;
+  case led_mode_go_trees:
+    matrix_show_go_trees(gfx);
+    led_scroll_set_step_ms(&gfx->scroll, scroll_ms);
+    break;
+  case led_mode_cs240lx:
+    matrix_show_cs240lx(gfx);
+    led_scroll_set_step_ms(&gfx->scroll, scroll_ms);
+    break;
+  default:
+    break;
+  }
+  led_gfx_show(gfx);
 }
 
-static void matrix_begin_red_dot_sweep(led_gfx_t *gfx, int *cycle_phase_out,
-                                       int *pending_phase_out, int next_phase) {
-  led_gfx_start_red_dot_sweep(gfx);
-  *pending_phase_out = next_phase;
-  *cycle_phase_out = phase_transition;
+static unsigned pot_to_scroll_ms(uint16_t raw) {
+  unsigned span = scroll_step_ms_max - scroll_step_ms_min;
+  unsigned ms = scroll_step_ms_max - (raw * span / 1023);
+  if(ms < scroll_step_ms_min)
+    ms = scroll_step_ms_min;
+  return ms;
 }
 
 static void map_touch_to_pixel(uint16_t touch_x, uint16_t touch_y, uint32_t width,
@@ -91,7 +108,7 @@ static void map_touch_to_pixel(uint16_t touch_x, uint16_t touch_y, uint32_t widt
 
 static uint16_t tsc2007_cmd(uint8_t cmd) {
   i2c_write(TSC2007_ADDR, &cmd, 1);
-  delay_us(200);
+  delay_us(500);
   uint8_t raw[2];
   i2c_read(TSC2007_ADDR, raw, 2);
   return ((uint16_t)raw[0] << 4) | (raw[1] >> 4);
@@ -180,19 +197,8 @@ static void oled_draw_touch_point(uint32_t x, uint32_t y) {
 
 static void oled_show_waiting(void) {
   ssd1306_display_clear();
-  ssd1306_display_draw_string_centered(20, "waiting for your", COLOR_WHITE);
-  ssd1306_display_draw_string_centered(36, "signature...", COLOR_WHITE);
-  oled_flush();
-}
-
-static void oled_show_countdown(unsigned sec_left) {
-  const char *msg = "1...";
-  if(sec_left >= 2)
-    msg = "Sending in 2";
-  else if(sec_left >= 1)
-    msg = "1...";
-  ssd1306_display_clear();
-  ssd1306_display_draw_string_centered(28, msg, COLOR_WHITE);
+  ssd1306_display_draw_string_centered(20, "sign here", COLOR_WHITE);
+  ssd1306_display_draw_string_centered(36, "press Done", COLOR_WHITE);
   oled_flush();
 }
 
@@ -202,23 +208,18 @@ static void oled_show_sent(void) {
   oled_flush();
 }
 
-static uint8_t oled_drawing_snapshot[SSD1306_DISPLAY_BUFFER_SIZE];
-static int oled_drawing_saved = 0;
-
-static void oled_drawing_snapshot_save(void) {
-  ssd1306_display_snapshot_save(oled_drawing_snapshot);
-  oled_drawing_saved = 1;
-}
-
-static void oled_drawing_snapshot_restore(void) {
-  if(!oled_drawing_saved)
-    return;
-  ssd1306_display_snapshot_restore(oled_drawing_snapshot);
-  oled_flush();
-}
-
-static void oled_drawing_snapshot_clear(void) {
-  oled_drawing_saved = 0;
+static void sig_save_and_send(int *has_strokes_out, unsigned *point_count_out,
+                              int *showing_sent_out, uint32_t *sent_until_out) {
+  output("sig: saving...\n");
+  sig_save();
+  ble_register_saved_zip();
+  sig_clear();
+  oled_show_sent();
+  *showing_sent_out = 1;
+  *sent_until_out = timer_get_usec() + (uint32_t)sig_sent_show_ms * 1000;
+  *has_strokes_out = 0;
+  *point_count_out = 0;
+  output("sig: saved, ready for next\n");
 }
 
 void notmain(void) {
@@ -234,6 +235,17 @@ void notmain(void) {
 
   gpio_set_output(pix_pin);
 
+  button_t done_button;
+  button_t mode_button;
+  button_init(&done_button, done_pin);
+  button_init(&mode_button, mode_pin);
+  pot_init();
+
+  led_gfx_t gfx = led_gfx_init(pix_pin, npixels);
+  int led_mode = led_mode_tree;
+  unsigned scroll_ms = scroll_step_ms;
+  apply_led_mode(&gfx, led_mode, scroll_ms);
+
   output("ble: init...\n");
   ble_init();
   ble_xfer_init();
@@ -245,24 +257,16 @@ void notmain(void) {
     ble_poll(&g_ble_conn);
   output("ble: advertising as cs240lx-pi\n");
 
-  led_gfx_t gfx = led_gfx_init(pix_pin, npixels);
-
-  matrix_show_tree(&gfx);
-  led_gfx_show(&gfx);
-  output("matrix cycle: tree -> Go Trees! -> CS240LX\n");
-
-  int cycle_phase = phase_tree;
-  int pending_phase = phase_tree;
-  uint32_t phase_start_usec = timer_get_usec();
+  output("led: mode button cycles tree / Go Trees! / CS240LX\n");
 
   int has_strokes = 0;
-  int countdown_sec = -1;
   int showing_sent = 0;
-  uint32_t last_touch_usec = 0;
   uint32_t sent_until_usec = 0;
   unsigned point_count = 0;
   int ble_was_connected = 0;
   int ble_oled_dirty = 1;
+  uint32_t pot_last_usec = 0;
+
   while (1) {
     ble_poll(&g_ble_conn);
     ble_xfer_poll(&g_ble_conn);
@@ -295,51 +299,42 @@ void notmain(void) {
 
     if(showing_sent && timer_get_usec() >= sent_until_usec) {
       showing_sent = 0;
-      oled_drawing_snapshot_clear();
       oled_show_waiting();
-      countdown_sec = -1;
     }
 
-    if(cycle_phase == phase_transition) {
-      if(led_gfx_tick_transition(&gfx)) {
-        cycle_phase = pending_phase;
-        if(cycle_phase == phase_tree)
-          phase_start_usec = timer_get_usec();
+    if(button_pressed(&mode_button)) {
+      led_mode = (led_mode + 1) % led_mode_count;
+      apply_led_mode(&gfx, led_mode, scroll_ms);
+      output("led: mode %d\n", led_mode);
+    }
+
+    if(button_pressed(&done_button) && has_strokes && !showing_sent) {
+      sig_save_and_send(&has_strokes, &point_count, &showing_sent,
+                        &sent_until_usec);
+    }
+
+    uint32_t now_usec = timer_get_usec();
+    if(now_usec - pot_last_usec >= (uint32_t)pot_poll_ms * 1000) {
+      pot_last_usec = now_usec;
+      unsigned new_scroll_ms = pot_to_scroll_ms(pot_read());
+      if(new_scroll_ms != scroll_ms) {
+        scroll_ms = new_scroll_ms;
+        if(led_mode != led_mode_tree)
+          led_scroll_set_step_ms(&gfx.scroll, scroll_ms);
       }
-    } else if(cycle_phase == phase_tree) {
+    }
+
+    if(led_mode == led_mode_tree) {
       led_gfx_tick_tree_sparkle(&gfx);
-      uint32_t elapsed = timer_get_usec() - phase_start_usec;
-      if(elapsed >= (uint32_t)tree_show_ms * 1000) {
-        matrix_show_go_trees(&gfx);
-        matrix_begin_red_dot_sweep(&gfx, &cycle_phase, &pending_phase,
-                                   phase_go_trees);
-        output("matrix scroll: Go Trees!\n");
-      }
-    } else if(cycle_phase == phase_go_trees) {
-      led_gfx_tick_scroll_anim(&gfx);
-      if(led_gfx_tick_scroll_pass(&gfx)) {
-        matrix_show_cs240lx(&gfx);
-        matrix_begin_wipe(&gfx, &cycle_phase, &pending_phase, phase_cs240lx);
-        output("matrix scroll: CS240LX\n");
-      }
     } else {
-      if(led_gfx_tick_scroll_pass(&gfx)) {
-        matrix_show_tree(&gfx);
-        matrix_begin_wipe(&gfx, &cycle_phase, &pending_phase, phase_tree);
-        output("matrix: tree\n");
-      }
+      led_gfx_tick_scroll_anim(&gfx);
+      led_gfx_tick_scroll_pass(&gfx);
     }
 
     uint16_t touch_x = 0;
     uint16_t touch_y = 0;
     if(!showing_sent && tsc2007_read_touch(&touch_x, &touch_y)) {
-      int was_countdown = countdown_sec >= 0;
-      countdown_sec = -1;
-
-      if(was_countdown) {
-        oled_drawing_snapshot_restore();
-      } else if(!has_strokes) {
-        oled_drawing_snapshot_clear();
+      if(!has_strokes) {
         ssd1306_display_clear();
         oled_flush();
       }
@@ -350,7 +345,6 @@ void notmain(void) {
                          SSD1306_DISPLAY_HEIGHT, &pixel_x, &pixel_y);
       oled_draw_touch_point(pixel_x, pixel_y);
       sig_draw_point(touch_x, touch_y);
-      last_touch_usec = timer_get_usec();
       has_strokes = 1;
       point_count++;
       if (point_count % 5 == 0) {
@@ -358,42 +352,8 @@ void notmain(void) {
       }
       output("touch x=%u y=%u -> oled %u,%u\n", touch_x, touch_y, pixel_x,
              pixel_y);
-    } else if(has_strokes && !showing_sent) {
-      uint32_t idle_usec = timer_get_usec() - last_touch_usec;
-      uint32_t grace_usec = (uint32_t)sig_grace_ms * 1000;
-      uint32_t countdown_usec = (uint32_t)sig_countdown_secs * 1000000;
-      uint32_t save_after_usec = grace_usec + countdown_usec;
-
-      if(idle_usec >= save_after_usec) {
-        output("sig: saving...\n");
-        sig_save();
-        ble_register_saved_zip();
-        sig_clear();
-        oled_show_sent();
-        showing_sent = 1;
-        sent_until_usec = timer_get_usec()
-                          + (uint32_t)sig_sent_show_ms * 1000;
-        has_strokes = 0;
-        countdown_sec = -1;
-        point_count = 0;
-        oled_drawing_snapshot_clear();
-        output("sig: saved, ready for next\n");
-      } else if(idle_usec >= grace_usec) {
-        uint32_t countdown_elapsed = idle_usec - grace_usec;
-        unsigned sec_left = sig_countdown_secs
-                            - countdown_elapsed / 1000000;
-        if(sec_left < 1)
-          sec_left = 1;
-        if((int)sec_left != countdown_sec) {
-          if(countdown_sec < 0)
-            oled_drawing_snapshot_save();
-          countdown_sec = (int)sec_left;
-          oled_show_countdown(sec_left);
-        }
-      } else if(countdown_sec >= 0) {
-        countdown_sec = -1;
-      }
     }
+
     delay_ms(poll_ms);
   }
 }
